@@ -166,4 +166,57 @@ with st.form("settings"):
 
 if submitted:
     with st.spinner("Training..."):
-        Q, history = 
+        Q, history = train(int(episodes), float(alpha), float(gamma), 0.999, int(seed))
+    st.session_state["result"] = dict(Q=Q, history=history, episodes=int(episodes), alpha=alpha, gamma=gamma)
+
+if "result" not in st.session_state:
+    st.info("Choose the settings above (the defaults work well) and press **Train the agent**. Training takes a few seconds.")
+    st.stop()
+
+res = st.session_state["result"]
+Q, history = res["Q"], res["history"]
+policy = Q.argmax(axis=1)
+st.caption(f"Current agent: {res['episodes']:,} training games, alpha = {res['alpha']}, gamma = {res['gamma']}.")
+
+st.subheader("Learning curve")
+st.line_chart(pd.Series(history).rolling(max(1, min(100, len(history) // 5))).mean().rename("average reward per game"))
+
+st.subheader("How good is the agent? (200 test games, same start positions)")
+table = pd.DataFrame({
+    "Random agent": evaluate(None),
+    "Your trained agent": evaluate(policy),
+    "Best possible (calculated)": evaluate(optimal_policy()),
+}).T
+table["success"] = (table["success"] * 100).round(0).astype(int).astype(str) + "%"
+table[["reward", "steps"]] = table[["reward", "steps"]].round(1)
+st.dataframe(table.rename(columns={"reward": "average reward", "steps": "average steps", "success": "games won"}))
+st.caption(
+    "'Best possible' is the mathematically best strategy, found by dynamic programming from the rules of the game. "
+    "With enough training the agent reaches it. With too little training or a bad setting (for example alpha = 0.01 or "
+    "gamma = 0.5) it does not."
+)
+
+st.subheader("Watch the agent play")
+col1, col2 = st.columns([1, 2])
+if col1.button("🎲 New game") or "game" not in st.session_state:
+    st.session_state["game"] = int(np.random.randint(0, 100000))
+start = int(np.random.default_rng(st.session_state["game"]).choice(STARTS))
+states, actions, rewards, won = play(policy, start)
+step = col2.slider("Step", 0, len(actions), 0)
+
+board_col, info_col = st.columns([1, 1])
+board = draw_board(states[step])
+board_col.pyplot(board)
+board.clf()
+with info_col:
+    if step == 0:
+        st.write("**Start position**")
+    else:
+        st.write(f"**Step {step}:** {ACTIONS[actions[step - 1]]}")
+        st.write(f"Reward so far: {sum(rewards[:step]):.0f}")
+    if step == len(actions):
+        if won:
+            st.success(f"Delivered in {len(actions)} steps, total reward {sum(rewards):.0f}")
+        else:
+            st.error(f"The agent did not deliver the passenger in {len(actions)} steps, total reward {sum(rewards):.0f}")
+st.caption("Moves: " + ", ".join(ACTIONS[a] for a in actions))
