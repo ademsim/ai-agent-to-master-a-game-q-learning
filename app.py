@@ -1,11 +1,15 @@
-import gymnasium as gym
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import streamlit as st
-from matplotlib.patches import Circle, Rectangle
 
 st.set_page_config(page_title="Taxi Q-Learning Agent")
+
+st.title("🚕 Taxi: an AI Agent that Learns by Trial and Error")
+st.write(
+    "A Q-learning agent learns to play the Taxi game (a classic from the Gymnasium library) without knowing the rules. "
+    "The taxi must pick up the passenger (blue dot) and drop them at the pink square. "
+    "Every step costs -1, a correct drop-off gives +20, and an illegal pick-up or drop-off costs -10."
+)
 
 MAP = ["+---------+", "|R: | : :G|", "| : | : : |", "| : : : : |", "| | : | : |", "|Y| : |B: |", "+---------+"]
 LOCS = [(0, 0), (0, 4), (4, 0), (4, 3)]
@@ -14,19 +18,45 @@ ACTIONS = ["south", "north", "east", "west", "pickup", "dropoff"]
 STOP_COLORS = ["#d62728", "#2ca02c", "#bcbd22", "#1f77b4"]
 
 
-@st.cache_resource
-def load_game():
-    name = "Taxi-v4" if "Taxi-v4" in gym.registry else "Taxi-v3"
-    u = gym.make(name).unwrapped
-    ns, rew, done = np.zeros((500, 6), int), np.zeros((500, 6)), np.zeros((500, 6), bool)
-    for s in range(500):
-        for a in range(6):
-            _, ns[s, a], rew[s, a], done[s, a] = u.P[s][a][0]
-    starts = np.flatnonzero(u.initial_state_distrib)
-    return ns, rew, done, starts
+def build_game():
+    """The rules of the Taxi game (the same as Gymnasium's Taxi): 500 states, 6 actions, no random moves."""
+    ns, rew, done = np.zeros((500, 6), int), np.full((500, 6), -1.0), np.zeros((500, 6), bool)
+    starts = []
+    for row in range(5):
+        for col in range(5):
+            for p in range(5):
+                for d in range(4):
+                    s = ((row * 5 + col) * 5 + p) * 4 + d
+                    if p < 4 and p != d:
+                        starts.append(s)
+                    for a in range(6):
+                        nr, nc, npass, r, term = row, col, p, -1.0, False
+                        if a == 0:
+                            nr = min(row + 1, 4)
+                        elif a == 1:
+                            nr = max(row - 1, 0)
+                        elif a == 2 and col < 4 and MAP[row + 1][2 * col + 2] != "|":
+                            nc = col + 1
+                        elif a == 3 and col > 0 and MAP[row + 1][2 * col] != "|":
+                            nc = col - 1
+                        elif a == 4:
+                            if p < 4 and (row, col) == LOCS[p]:
+                                npass = 4
+                            else:
+                                r = -10.0
+                        elif a == 5:
+                            if (row, col) == LOCS[d] and p == 4:
+                                npass, term, r = d, True, 20.0
+                            elif (row, col) in LOCS and p == 4:
+                                npass = LOCS.index((row, col))
+                            else:
+                                r = -10.0
+                        ns[s, a], rew[s, a], done[s, a] = ((nr * 5 + nc) * 5 + npass) * 4 + d, r, term
+    return ns, rew, done, np.array(starts)
 
 
-NS, REW, DONE, STARTS = load_game()
+with st.spinner("Loading the game..."):
+    NS, REW, DONE, STARTS = build_game()
 
 
 def decode(state):
@@ -96,6 +126,9 @@ def evaluate(policy, n=200):
 
 
 def draw_board(state):
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Circle, Rectangle
+
     row, col, passenger, dest = decode(state)
     fig, ax = plt.subplots(figsize=(4, 4))
     ax.set_xlim(0, 5)
@@ -114,4 +147,23 @@ def draw_board(state):
         for c in range(4):
             if MAP[r + 1][2 * c + 2] == "|":
                 ax.plot([c + 1, c + 1], [r, r + 1], color="black", lw=3)
-  
+    if passenger < 4:
+        pr, pc = LOCS[passenger]
+        ax.add_patch(Circle((pc + 0.5, pr + 0.62), 0.16, color="#1f77b4"))
+    color = "#2ca02c" if passenger == 4 else "#ffdd00"
+    ax.add_patch(Rectangle((col + 0.2, row + 0.3), 0.6, 0.4, color=color, ec="black", lw=1.5))
+    ax.text(col + 0.5, row + 0.5, "taxi", ha="center", va="center", fontsize=8)
+    return fig
+
+
+with st.form("settings"):
+    c1, c2 = st.columns(2)
+    episodes = c1.select_slider("Training games", [200, 500, 1000, 2000, 5000, 10000], value=5000)
+    alpha = c2.select_slider("Learning rate (alpha)", [0.01, 0.05, 0.1, 0.3, 0.5, 1.0], value=0.1)
+    gamma = c1.select_slider("Discount factor (gamma)", [0.5, 0.8, 0.9, 0.95, 0.99], value=0.99)
+    seed = c2.number_input("Random seed", 0, 9999, 42)
+    submitted = st.form_submit_button("Train the agent")
+
+if submitted:
+    with st.spinner("Training..."):
+        Q, history = 
