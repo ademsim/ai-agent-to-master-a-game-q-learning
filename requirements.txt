@@ -1,5 +1,4 @@
 streamlit
-gymnasium
 numpy
 pandas
 matplotlib
